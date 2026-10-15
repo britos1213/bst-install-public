@@ -1,0 +1,10 @@
+{
+  "sistema": "BST Install",
+  "versao": "1.2",
+  "programas": [
+    { "nome": "WinRAR", "ativo": true, "metodo": "winget", "id_pacote": "RARLab.WinRAR" },
+    { "nome": "Google Chrome", "ativo": true, "metodo": "winget", "id_pacote": "Google.Chrome" },
+    { "nome": "Mozilla Firefox", "ativo": true, "metodo": "winget", "id_pacote": "Mozilla.Firefox" },
+    { "nome": "Microsoft Office (configurar pacote oficial)", "ativo": false, "metodo": "arquivo", "tipo": "exe", "url": "https://exemplo.invalid/office-setup.exe", "sha256": "PREENCHER_SHA256" }
+  ]
+}
