@@ -205,6 +205,56 @@ function Instalar-Programa($p) {
     Write-Host "Finalizado: $($p.nome)" -ForegroundColor Green
 }
 
+function Preparar-BST {
+    Write-Host '========================================' -ForegroundColor Cyan
+    Write-Host '       BST INSTALL - PREPARACAO' -ForegroundColor Cyan
+    Write-Host '========================================' -ForegroundColor Cyan
+    Write-Host "[1/3] PowerShell $($PSVersionTable.PSVersion)"
+    Write-Host '[2/3] Verificando acesso ao catalogo...'
+    try {
+        $null = Invoke-WebRequest -Uri $CatalogUrl -Method Head -UseBasicParsing -TimeoutSec 15
+        Write-Host 'Catalogo acessivel.' -ForegroundColor Green
+    } catch {
+        Write-Host 'Nao foi possivel verificar a conexao. O carregamento sera tentado.' -ForegroundColor Yellow
+    }
+    Write-Host '[3/3] Verificando Winget...'
+    if (Get-Command winget -ErrorAction SilentlyContinue) {
+        Write-Host 'Winget encontrado. Atualizando fontes...' -ForegroundColor Cyan
+        try {
+            & winget source update
+            if ($LASTEXITCODE -ne 0) { Write-Host 'Fontes nao atualizadas; continuando.' -ForegroundColor Yellow }
+        } catch { Write-Host 'Falha ao atualizar fontes; continuando.' -ForegroundColor Yellow }
+    } else {
+        Write-Host 'Winget ausente. Alternativas oficiais serao usadas quando disponiveis.' -ForegroundColor Yellow
+    }
+    Write-Host 'Preparacao finalizada.' -ForegroundColor Green
+}
+
+function Atualizar-ProgramasBST($programas) {
+    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+        Write-Host 'Atualizacao via Winget indisponivel neste computador.' -ForegroundColor Yellow
+        Write-Host 'As instalacoes alternativas continuam disponiveis no menu.'
+        return
+    }
+    Write-Host 'Verificando atualizacoes dos programas do catalogo...' -ForegroundColor Cyan
+    Write-Host 'Office e Java ficam fora da atualizacao automatica para preservar versoes.' -ForegroundColor Yellow
+    foreach ($p in $programas) {
+        if ($p.metodo -ne 'winget' -or $p.id_pacote -match '^(EclipseAdoptium\.|Microsoft\.)') { continue }
+        Write-Host "`nVerificando: $($p.nome)" -ForegroundColor Cyan
+        try {
+            & winget upgrade --id $p.id_pacote --exact --source winget --accept-source-agreements
+            $codigo = $LASTEXITCODE
+            if ($codigo -ne 0) { Write-Host "Consulta retornou codigo $codigo." -ForegroundColor Yellow; continue }
+            $confirma = (Read-Host "Atualizar $($p.nome) se houver atualizacao? (S/N)").Trim()
+            if ($confirma -match '^[sS]$') {
+                & winget upgrade --id $p.id_pacote --exact --source winget --accept-source-agreements --accept-package-agreements
+                if ($LASTEXITCODE -ne 0) { Write-Host "Atualizacao retornou codigo $LASTEXITCODE." -ForegroundColor Yellow }
+            }
+        } catch { Write-Host "Falha ao consultar $($p.nome): $($_.Exception.Message)" -ForegroundColor Yellow }
+    }
+}
+
+Preparar-BST
 try { $programas = @(Ler-Catalogo) } catch { Write-Host $_ -ForegroundColor Red; Read-Host 'ENTER para sair'; exit 1 }
 while ($true) {
     Clear-Host
@@ -212,10 +262,16 @@ while ($true) {
     Write-Host '       BST INSTALL - PROGRAMAS' -ForegroundColor Cyan
     Write-Host '========================================' -ForegroundColor Cyan
     for ($i = 0; $i -lt $programas.Count; $i++) { Write-Host ('[{0}] {1}' -f ($i + 1), $programas[$i].nome) }
+    Write-Host '[A] Verificar/atualizar programas instalados'
     Write-Host '[R] Recarregar catalogo'
     Write-Host '[0] Sair'
     $opcao = (Read-Host 'Escolha (ex.: 1,2,3)').Trim()
     if ($opcao -eq '0') { break }
+    if ($opcao -match '^[aA]$') {
+        Atualizar-ProgramasBST $programas
+        Read-Host 'ENTER para voltar ao menu'
+        continue
+    }
     if ($opcao -match '^[rR]$') {
         try { $programas = @(Ler-Catalogo) } catch { Write-Host $_ -ForegroundColor Red; Read-Host 'ENTER para continuar' }
         continue
