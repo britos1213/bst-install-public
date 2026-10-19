@@ -59,6 +59,12 @@ function Instalar-Programa($p) {
         if (-not (Get-Command winget -ErrorAction SilentlyContinue)) { throw 'Winget nao encontrado' }
         & winget install --id $p.id_pacote --exact --source winget --accept-source-agreements --accept-package-agreements
         $codigo = $LASTEXITCODE
+        # Winget: APPINSTALLER_CLI_ERROR_UPDATE_NOT_APPLICABLE (-1978335189).
+        # Programa ja instalado sem atualizacao disponivel: nao baixar novamente.
+        if ($codigo -eq -1978335189) {
+            Write-Host 'Programa ja instalado e sem atualizacao disponivel.' -ForegroundColor Green
+            return
+        }
         if ($codigo -ne 0) {
             if ($p.id_pacote -eq 'Google.Chrome') {
                 Write-Host "Winget falhou (codigo $codigo). Tentando instalador oficial verificado..." -ForegroundColor Yellow
