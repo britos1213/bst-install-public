@@ -25,26 +25,34 @@ function Testar-Assinatura($arquivo, $fabricante) {
     }
 }
 
+function Testar-ChromeInstalado {
+    $caminhos = @(
+        'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Google Chrome',
+        'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Google Chrome',
+        'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Google Chrome'
+    )
+    foreach ($caminho in $caminhos) {
+        if (Test-Path $caminho) { return $true }
+    }
+    return ((Test-Path "$env:ProgramFiles\Google\Chrome\Application\chrome.exe") -or
+            (Test-Path "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe") -or
+            (Test-Path "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe"))
+}
+
 function Instalar-ChromeOficial {
+    if (Testar-ChromeInstalado) {
+        Write-Host 'Google Chrome ja instalado. Sem Winget, atualizacao automatica nao sera executada.' -ForegroundColor Green
+        return
+    }
     $url = 'https://dl.google.com/dl/chrome/install/googlechromestandaloneenterprise64.msi'
     $arquivo = Join-Path $DownloadDir ('bst-chrome-' + [guid]::NewGuid().ToString('N') + '.msi')
     try {
-        Write-Host 'Consultando hash publicado pelo Winget...' -ForegroundColor Yellow
-        $manifesto = (& winget show --id Google.Chrome --exact --source winget 2>&1 | Out-String)
-        if ($LASTEXITCODE -ne 0) { throw 'Nao foi possivel consultar o manifesto do Chrome no Winget.' }
-        $hashes = [regex]::Matches($manifesto, '(?im)^\s*(?:Instalador SHA256|Installer SHA256|SHA256)\s*:\s*([a-f0-9]{64})\s*$')
-        if ($hashes.Count -ne 1) { throw 'Nao foi possivel identificar um SHA256 unico no manifesto. Instalacao cancelada.' }
-        $hashEsperado = $hashes[0].Groups[1].Value
-        $urls = [regex]::Matches($manifesto, '(?im)^\s*(?:URL do instalador|Installer URL)\s*:\s*(https://\S+)\s*$')
-        if ($urls.Count -ne 1 -or $urls[0].Groups[1].Value -ne $url) {
-            throw 'URL do instalador nao confere com a fonte oficial esperada. Instalacao cancelada.'
-        }
         Write-Host 'Baixando MSI oficial do Google Chrome...' -ForegroundColor Cyan
         Invoke-WebRequest -Uri $url -OutFile $arquivo -UseBasicParsing -TimeoutSec 600
-        $hashReal = (Get-FileHash -Path $arquivo -Algorithm SHA256).Hash
-        if ($hashReal -ine $hashEsperado) { throw 'SHA256 do Chrome nao corresponde ao manifesto. Instalacao cancelada.' }
+        # Sem manifesto do Winget nao existe SHA256 publicado para comparar.
+        # Exigimos assinatura Authenticode valida do fabricante oficial.
         Testar-Assinatura $arquivo 'Google LLC'
-        Write-Host 'Hash e assinatura do Google verificados.' -ForegroundColor Green
+        Write-Host 'Assinatura digital do Google verificada.' -ForegroundColor Green
         $proc = Start-Process -FilePath msiexec.exe -ArgumentList @('/i', ('"' + $arquivo + '"'), '/passive', '/norestart') -Wait -PassThru
         if ($proc.ExitCode -notin @(0,3010,1641)) { throw "Instalador MSI retornou codigo $($proc.ExitCode)" }
         if ($proc.ExitCode -in @(3010,1641)) { Write-Host 'Reinicio pode ser necessario.' -ForegroundColor Yellow }
@@ -56,7 +64,15 @@ function Instalar-ChromeOficial {
 function Instalar-Programa($p) {
     Write-Host "`nPreparando: $($p.nome)" -ForegroundColor Cyan
     if ($p.metodo -eq 'winget') {
-        if (-not (Get-Command winget -ErrorAction SilentlyContinue)) { throw 'Winget nao encontrado' }
+        if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+            if ($p.id_pacote -eq 'Google.Chrome') {
+                Write-Host 'Winget nao encontrado. Usando instalador oficial do Google.' -ForegroundColor Yellow
+                Instalar-ChromeOficial
+                Write-Host "Finalizado: $($p.nome)" -ForegroundColor Green
+                return
+            }
+            throw "Winget nao encontrado para $($p.nome). Instale o App Installer da Microsoft ou configure metodo arquivo com URL, SHA256 e assinante no catalogo."
+        }
         & winget install --id $p.id_pacote --exact --source winget --accept-source-agreements --accept-package-agreements
         $codigo = $LASTEXITCODE
         # Winget: APPINSTALLER_CLI_ERROR_UPDATE_NOT_APPLICABLE (-1978335189).
