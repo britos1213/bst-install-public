@@ -8,6 +8,17 @@
     {"nome":"Microsoft Office 2013","ativo":true,"metodo":"arquivo","tipo":"exe","url":"https://raw.githubusercontent.com/britos1213/bst-install-public/main/Office2013.exe","sha256":"D10CE0B6941C16A4CF409C1FD0EADBC4EA500369E8CC6291210DAF1A5E2DBB44","assinante":"Microsoft Corporation"},
     {"nome":"Microsoft Office 2016","ativo":true,"metodo":"arquivo","tipo":"exe","url":"https://raw.githubusercontent.com/britos1213/bst-install-public/main/Office2016.exe","sha256":"DE84453116ABF13571C75C4EAD2C54CCC8373CA7FC2CC3BEC6FCA06B3DB61223","assinante":"Microsoft Corporation"},
     {"nome":"Microsoft Office 2019","ativo":true,"metodo":"arquivo","tipo":"exe","url":"https://raw.githubusercontent.com/britos1213/bst-install-public/main/Office2019.exe","sha256":"95DE04F54B4A25336A49DDEE18EF1D5FDC7C8A7771F149D21BA97708232A445A","assinante":"Microsoft Corporation"},
-    {"nome":"CrystalDiskInfo - Saude SSD/HD","ativo":true,"metodo":"winget","id_pacote":"CrystalDewWorld.CrystalDiskInfo"}
+    {"nome":"CrystalDiskInfo - Saude SSD/HD","ativo":true,"metodo":"winget","id_pacote":"CrystalDewWorld.CrystalDiskInfo"},
+{  "nome": "AnyDesk",
+  "ativo": true,
+  "metodo": "winget",
+  "id_pacote": "AnyDeskSoftwareGmbH.AnyDesk"
+},
+{
+  "nome": "Java 8 (JRE)",
+  "ativo": true,
+  "metodo": "winget",
+  "id_pacote": "EclipseAdoptium.Temurin.8.JRE"
+}
   ]
 }
