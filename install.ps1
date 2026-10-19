@@ -543,6 +543,106 @@ function Varredura-ProgramasBST {
     Write-Host 'A lista nao mede uso real ou importancia do programa para o cliente.' -ForegroundColor Yellow
 }
 
+
+# Remocao em lote estritamente limitada a seis Appx opcionais do usuario atual.
+# Nao altera provisionamento, outros usuarios, drivers ou componentes do sistema.
+function Remover-OpcionaisEmLoteBST {
+    Write-Host "`n========================================" -ForegroundColor Cyan
+    Write-Host ' BST - LIMPEZA EM LOTE (6 APPS)' -ForegroundColor Cyan
+    Write-Host '========================================' -ForegroundColor Cyan
+
+    if (-not (Get-Command Get-AppxPackage -ErrorAction SilentlyContinue) -or
+        -not (Get-Command Remove-AppxPackage -ErrorAction SilentlyContinue)) {
+        Write-Host 'Comandos Appx indisponiveis neste computador.' -ForegroundColor Yellow
+        return
+    }
+    if ([Environment]::OSVersion.Version.Major -ne 10) {
+        Write-Host 'Recurso destinado a Windows 10 e 11.' -ForegroundColor Yellow
+        return
+    }
+
+    $alvos = @(
+        [pscustomobject]@{ Nome='Microsoft People'; Id='Microsoft.People' },
+        [pscustomobject]@{ Nome='Central de Comentarios'; Id='Microsoft.WindowsFeedbackHub' },
+        [pscustomobject]@{ Nome='Mapas'; Id='Microsoft.WindowsMaps' },
+        [pscustomobject]@{ Nome='Xbox TCUI'; Id='Microsoft.Xbox.TCUI' },
+        [pscustomobject]@{ Nome='Xbox App'; Id='Microsoft.XboxApp' },
+        [pscustomobject]@{ Nome='Xbox Identity Provider'; Id='Microsoft.XboxIdentityProvider' }
+    )
+    $pasta = Obter-PastaRelatoriosBST
+    $marca = Get-Date -Format 'yyyyMMdd-HHmmss'
+    $inventario = Join-Path $pasta "BST-Lote-Inventario-$marca.csv"
+    $resultado = Join-Path $pasta "BST-Lote-Resultado-$marca.csv"
+    $depois = Join-Path $pasta "BST-Lote-Apos-$marca.csv"
+
+    $instalados = @(Get-AppxPackage -ErrorAction Stop)
+    $instalados | Select-Object Name,Version,PackageFullName,PackageFamilyName,InstallLocation |
+        Export-Csv -Path $inventario -NoTypeInformation -Encoding UTF8
+    Write-Host "Inventario ANTES: $inventario" -ForegroundColor Green
+    Write-Host 'CSV e apenas inventario; nao e backup dos aplicativos nem dos dados.' -ForegroundColor Yellow
+
+    $encontrados = @()
+    foreach ($alvo in $alvos) {
+        foreach ($app in @($instalados | Where-Object {
+            $_.Name -ceq $alvo.Id -and -not $_.IsFramework -and -not $_.NonRemovable
+        })) {
+            $encontrados += [pscustomobject]@{
+                Nome=$alvo.Nome; Id=$alvo.Id; Versao=[string]$app.Version;
+                PackageFullName=$app.PackageFullName
+            }
+        }
+    }
+    if ($encontrados.Count -eq 0) {
+        Write-Host 'Nenhum dos seis aplicativos opcionais esta instalado para o usuario atual.' -ForegroundColor Green
+        return
+    }
+
+    Write-Host "`nAplicativos encontrados para remocao:" -ForegroundColor Cyan
+    for ($i=0; $i -lt $encontrados.Count; $i++) {
+        Write-Host ('[{0}] {1} | {2} | v{3}' -f ($i+1),$encontrados[$i].Nome,$encontrados[$i].Id,$encontrados[$i].Versao)
+    }
+    Write-Host "`nApenas o usuario atual sera afetado. Apps podem voltar apos atualizacoes." -ForegroundColor Yellow
+    Write-Host 'Store, OneDrive, Defender, Edge, drivers e dependencias ficam intactos.' -ForegroundColor Yellow
+    Write-Host 'Feche os aplicativos listados antes de continuar.' -ForegroundColor Yellow
+    $confirmacao = (Read-Host 'Para remover TODOS os listados digite REMOVER LOTE (ou 0 para cancelar)').Trim()
+    if ($confirmacao -cne 'REMOVER LOTE') {
+        Write-Host 'Operacao cancelada. Nenhum aplicativo removido.' -ForegroundColor Yellow
+        [pscustomobject]@{Data=(Get-Date).ToString('s');Nome='Lote';Pacote='';Resultado='Cancelado';Detalhe='Usuario nao confirmou'} |
+            Export-Csv -Path $resultado -NoTypeInformation -Encoding UTF8
+        Write-Host "Relatorio: $resultado" -ForegroundColor Cyan
+        return
+    }
+
+    $registros = @()
+    foreach ($app in $encontrados) {
+        try {
+            # Confere novamente o identificador EXATO contra a lista fechada.
+            if (-not @($alvos | Where-Object { $_.Id -ceq $app.Id }).Count) { throw 'Pacote fora da lista permitida' }
+            $atual = @(Get-AppxPackage -Name $app.Id -ErrorAction Stop | Where-Object {
+                $_.PackageFullName -ceq $app.PackageFullName -and -not $_.IsFramework -and -not $_.NonRemovable
+            })
+            if ($atual.Count -eq 0) { throw 'Pacote nao encontrado na verificacao final' }
+            Remove-AppxPackage -Package $app.PackageFullName -ErrorAction Stop
+            $status = 'Removido'; $detalhe = 'Usuario atual'
+            Write-Host "Removido: $($app.Nome)" -ForegroundColor Green
+        } catch {
+            $status = 'Falha'; $detalhe = $_.Exception.Message
+            Write-Host "Falha em $($app.Nome): $detalhe" -ForegroundColor Red
+        }
+        $registros += [pscustomobject]@{
+            Data=(Get-Date).ToString('s');Nome=$app.Nome;Pacote=$app.Id;
+            Versao=$app.Versao;Resultado=$status;Detalhe=$detalhe
+        }
+    }
+    $registros | Export-Csv -Path $resultado -NoTypeInformation -Encoding UTF8
+    @(Get-AppxPackage -ErrorAction Stop) |
+        Select-Object Name,Version,PackageFullName,PackageFamilyName,InstallLocation |
+        Export-Csv -Path $depois -NoTypeInformation -Encoding UTF8
+    Write-Host "`nResultado: $resultado" -ForegroundColor Cyan
+    Write-Host "Inventario APOS: $depois" -ForegroundColor Cyan
+    Write-Host 'Se necessario, reinicie o Windows. Nenhum componente essencial foi selecionado.' -ForegroundColor Yellow
+}
+
 function Menu-LimpezaBST {
     while ($true) {
         Write-Host "`n========================================" -ForegroundColor Cyan
@@ -553,6 +653,7 @@ function Menu-LimpezaBST {
         Write-Host '[3] Relatorio de programas de inicializacao (sem alterar)'
         Write-Host '[4] Relatorio de espaco em disco'
         Write-Host '[5] Varredura completa de aplicativos (Appx + programas Win32; sem remover)'
+        Write-Host '[6] Remover em lote: People, Comentarios, Mapas e 3 apps Xbox'
         Write-Host '[0] Voltar ao menu principal'
         $op = (Read-Host 'Escolha').Trim()
         if ($op -eq '0') { return }
@@ -563,6 +664,7 @@ function Menu-LimpezaBST {
                 '3' { Analisar-InicializacaoBST }
                 '4' { Analisar-ArmazenamentoBST }
                 '5' { Varredura-ProgramasBST }
+                '6' { Remover-OpcionaisEmLoteBST }
                 default { Write-Host 'Opcao invalida.' -ForegroundColor Yellow }
             }
         } catch { Write-Host "Falha: $($_.Exception.Message)" -ForegroundColor Red }
