@@ -1,4 +1,4 @@
-# BST Install - catalogo remoto, PowerShell 5.1+
+﻿# BST Install - catalogo remoto, PowerShell 5.1+
 $ErrorActionPreference = 'Stop'
 $CatalogUrl = 'https://raw.githubusercontent.com/britos1213/bst-install-public/main/programas.json'
 $DownloadDir = Join-Path $env:TEMP 'BST-Install'
@@ -61,6 +61,81 @@ function Instalar-ChromeOficial {
     }
 }
 
+function Instalar-Java8Oficial {
+    if (-not [Environment]::Is64BitOperatingSystem) {
+        throw 'Instalacao alternativa do Java 8 disponivel somente para Windows 64 bits.'
+    }
+    # A API oficial fornece URL e checksum SHA256 da versao atual do Temurin 8 JRE.
+    $api = 'https://api.adoptium.net/v3/assets/latest/8/hotspot?architecture=x64&image_type=jre&os=windows&vendor=eclipse'
+    Write-Host 'Consultando API oficial Eclipse Adoptium (Temurin 8 JRE x64)...' -ForegroundColor Cyan
+    $releases = @(Invoke-RestMethod -Uri $api -UseBasicParsing -TimeoutSec 45)
+    $release = @($releases | Where-Object {
+        $_.binary -and $_.binary.package -and $_.binary.package.link -match '^https://' -and
+        $_.binary.package.checksum -match '^[a-fA-F0-9]{64}$' -and
+        $_.binary.package.name -match '\.msi$'
+    } | Select-Object -First 1)
+    if ($release.Count -eq 0) { throw 'Nao foi encontrado MSI com SHA256 na API oficial. Instalacao cancelada.' }
+    $pacote = $release[0].binary.package
+    $uri = [Uri]$pacote.link
+    if ($uri.Host -notin @('github.com','api.adoptium.net')) {
+        throw "Dominio de download inesperado: $($uri.Host)"
+    }
+    $arquivo = Join-Path $DownloadDir ('bst-temurin8-' + [guid]::NewGuid().ToString('N') + '.msi')
+    try {
+        Write-Host 'Baixando Java 8 JRE oficial...' -ForegroundColor Cyan
+        Invoke-WebRequest -Uri $pacote.link -OutFile $arquivo -UseBasicParsing -TimeoutSec 900
+        $hash = (Get-FileHash -Path $arquivo -Algorithm SHA256).Hash
+        if ($hash -ine $pacote.checksum) { throw 'SHA256 do Java nao confere com o publicado pela Adoptium.' }
+        $assinatura = Get-AuthenticodeSignature -FilePath $arquivo
+        if ($assinatura.Status -ne 'Valid') { throw "Assinatura digital do Java invalida: $($assinatura.Status)" }
+        Write-Host 'SHA256 e assinatura digital verificados.' -ForegroundColor Green
+        $proc = Start-Process msiexec.exe -ArgumentList @('/i', ('"' + $arquivo + '"'), '/passive', '/norestart') -Wait -PassThru
+        if ($proc.ExitCode -notin @(0,3010,1641)) { throw "MSI Java retornou codigo $($proc.ExitCode)" }
+        if ($proc.ExitCode -in @(3010,1641)) { Write-Host 'Reinicio pode ser necessario.' -ForegroundColor Yellow }
+    } finally {
+        Remove-Item $arquivo -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Testar-FirefoxInstalado {
+    $caminhos = @(
+        "$env:ProgramFiles\Mozilla Firefox\firefox.exe",
+        "${env:ProgramFiles(x86)}\Mozilla Firefox\firefox.exe"
+    )
+    foreach ($caminho in $caminhos) { if (Test-Path $caminho) { return $true } }
+    return $false
+}
+
+function Instalar-FirefoxOficial {
+    if (Testar-FirefoxInstalado) {
+        Write-Host 'Firefox ja instalado. Sem Winget, atualizacao automatica nao sera executada.' -ForegroundColor Green
+        return
+    }
+    $url = 'https://download.mozilla.org/?product=firefox-latest-ssl&os=win64&lang=pt-BR'
+    if (-not [Environment]::Is64BitOperatingSystem) {
+        $url = 'https://download.mozilla.org/?product=firefox-latest-ssl&os=win&lang=pt-BR'
+    }
+    $arquivo = Join-Path $DownloadDir ('bst-firefox-' + [guid]::NewGuid().ToString('N') + '.exe')
+    try {
+        Write-Host 'Baixando Firefox pelo endereco oficial da Mozilla...' -ForegroundColor Cyan
+        Invoke-WebRequest -Uri $url -OutFile $arquivo -UseBasicParsing -TimeoutSec 900 -MaximumRedirection 10
+        $sig = Get-AuthenticodeSignature -FilePath $arquivo
+        if ($sig.Status -ne 'Valid' -or $null -eq $sig.SignerCertificate) {
+            throw "Assinatura digital do Firefox invalida: $($sig.Status)"
+        }
+        $subject = $sig.SignerCertificate.Subject
+        if ($subject -notmatch 'O=Mozilla (Corporation|Foundation)(,|$)') {
+            throw "Fabricante do Firefox nao corresponde a Mozilla: $subject"
+        }
+        Write-Host 'Assinatura digital da Mozilla verificada.' -ForegroundColor Green
+        $proc = Start-Process -FilePath $arquivo -Wait -PassThru
+        if ($proc.ExitCode -notin @(0,3010,1641)) { throw "Instalador Firefox retornou codigo $($proc.ExitCode)" }
+        if ($proc.ExitCode -in @(3010,1641)) { Write-Host 'Reinicio pode ser necessario.' -ForegroundColor Yellow }
+    } finally {
+        Remove-Item $arquivo -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Instalar-Programa($p) {
     Write-Host "`nPreparando: $($p.nome)" -ForegroundColor Cyan
     if ($p.metodo -eq 'winget') {
@@ -68,6 +143,18 @@ function Instalar-Programa($p) {
             if ($p.id_pacote -eq 'Google.Chrome') {
                 Write-Host 'Winget nao encontrado. Usando instalador oficial do Google.' -ForegroundColor Yellow
                 Instalar-ChromeOficial
+                Write-Host "Finalizado: $($p.nome)" -ForegroundColor Green
+                return
+            }
+            if ($p.id_pacote -eq 'Mozilla.Firefox') {
+                Write-Host 'Winget nao encontrado. Usando instalador oficial da Mozilla.' -ForegroundColor Yellow
+                Instalar-FirefoxOficial
+                Write-Host "Finalizado: $($p.nome)" -ForegroundColor Green
+                return
+            }
+            if ($p.id_pacote -eq 'EclipseAdoptium.Temurin.8.JRE') {
+                Write-Host 'Winget nao encontrado. Instalando Temurin 8 JRE pelo fornecedor oficial.' -ForegroundColor Yellow
+                Instalar-Java8Oficial
                 Write-Host "Finalizado: $($p.nome)" -ForegroundColor Green
                 return
             }
@@ -85,6 +172,12 @@ function Instalar-Programa($p) {
             if ($p.id_pacote -eq 'Google.Chrome') {
                 Write-Host "Winget falhou (codigo $codigo). Tentando instalador oficial verificado..." -ForegroundColor Yellow
                 Instalar-ChromeOficial
+            } elseif ($p.id_pacote -eq 'Mozilla.Firefox') {
+                Write-Host "Winget falhou (codigo $codigo). Tentando Firefox oficial..." -ForegroundColor Yellow
+                Instalar-FirefoxOficial
+            } elseif ($p.id_pacote -eq 'EclipseAdoptium.Temurin.8.JRE') {
+                Write-Host "Winget falhou (codigo $codigo). Tentando Java oficial..." -ForegroundColor Yellow
+                Instalar-Java8Oficial
             } else {
                 throw "Winget retornou codigo $codigo"
             }
