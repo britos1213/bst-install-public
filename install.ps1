@@ -1121,6 +1121,90 @@ function Diagnosticar-BlocosFixadosBST {
     Write-Host 'Para retirar um bloco, clique nele com o botao direito no Iniciar e escolha Desafixar de Iniciar.' -ForegroundColor Yellow
 }
 
+function Remover-AppsSolicitadosBST {
+    Write-Host "`n BST - APPS OPCIONAIS: USUARIO E PROVISIONAMENTO" -ForegroundColor Cyan
+    Write-Host 'Analise separada: usuario atual, provisionado para novos usuarios e blocos fixados.'
+    Write-Host 'Nao remove Office desktop, dados pessoais, Store, Edge, Defender ou componentes Xbox integrados.' -ForegroundColor Yellow
+    $grupos = @(
+        @{Nome='Office Hub (NAO Word/Excel)'; Pacotes=@('Microsoft.MicrosoftOfficeHub')},
+        @{Nome='Email e Calendario'; Pacotes=@('microsoft.windowscommunicationsapps')},
+        @{Nome='LinkedIn'; Pacotes=@('7EE7776C.LinkedInforWindows')},
+        @{Nome='Microsoft To Do'; Pacotes=@('Microsoft.Todos')},
+        @{Nome='Solitaire'; Pacotes=@('Microsoft.MicrosoftSolitaireCollection')},
+        @{Nome='Clima'; Pacotes=@('Microsoft.BingWeather')},
+        @{Nome='Cortana'; Pacotes=@('Microsoft.549981C3F5F10')},
+        @{Nome='Xbox - apps opcionais'; Pacotes=@('Microsoft.XboxApp','Microsoft.Xbox.TCUI','Microsoft.XboxIdentityProvider','Microsoft.XboxGamingOverlay','Microsoft.GamingApp')}
+    )
+    try { $instalados = @(Get-AppxPackage -ErrorAction Stop) }
+    catch { Write-Host "Falha ao consultar Appx: $_" -ForegroundColor Red; return }
+    $provisionados = @()
+    try { $provisionados = @(Get-AppxProvisionedPackage -Online -ErrorAction Stop) }
+    catch { Write-Host 'Nao foi possivel consultar provisionamento (execute como administrador). Nenhuma remocao de provisionamento sera oferecida.' -ForegroundColor Yellow }
+    $opcoes = @()
+    for ($i=0; $i -lt $grupos.Count; $i++) {
+        $g = $grupos[$i]
+        $appx = @($instalados | Where-Object { $_.Name -in $g.Pacotes -and -not $_.NonRemovable -and -not $_.IsFramework })
+        $prov = @($provisionados | Where-Object { $_.DisplayName -in $g.Pacotes })
+        $opcoes += [pscustomobject]@{Numero=$i+1; Nome=$g.Nome; Usuario=$appx; Provisionados=$prov}
+        Write-Host ('[{0}] {1} | usuario: {2} | provisionado: {3}' -f ($i+1),$g.Nome,$appx.Count,$prov.Count)
+    }
+    Write-Host 'Nao altera pacotes instalados em outros usuarios; remover provisionamento afeta NOVOS perfis.' -ForegroundColor Yellow
+    Write-Host 'Blocos fixados nao sao alterados; utilize a opcao [9] para diagnosticar.'
+    $entrada = (Read-Host 'Numeros para selecionar (ex.: 1,3,5; ENTER cancela)').Trim()
+    if (-not $entrada -or $entrada -eq '0') { Write-Host 'Cancelado.'; return }
+    $nums = @()
+    foreach ($parte in ($entrada -split ',')) {
+        $parte = $parte.Trim()
+        if ($parte -notmatch '^[1-8]$' -or [int]$parte -in $nums) { Write-Host 'Selecao invalida. Nada removido.' -ForegroundColor Red; return }
+        $nums += [int]$parte
+    }
+    $selecionados = @($opcoes | Where-Object { $_.Numero -in $nums })
+    $alvosUsuario = @($selecionados | ForEach-Object { $_.Usuario })
+    $alvosProv = @($selecionados | ForEach-Object { $_.Provisionados })
+    if (-not $alvosUsuario.Count -and -not $alvosProv.Count) { Write-Host 'Nenhum pacote correspondente encontrado. Nada removido.' -ForegroundColor Yellow; return }
+    Write-Host "`nPacotes encontrados para o usuario atual:" -ForegroundColor Cyan
+    if ($alvosUsuario.Count) { $alvosUsuario | Select-Object Name,PackageFullName | Format-Table -AutoSize | Out-Host } else { Write-Host 'Nenhum' }
+    Write-Host "`nPacotes provisionados para novos usuarios:" -ForegroundColor Cyan
+    if ($alvosProv.Count) { $alvosProv | Select-Object DisplayName,PackageName | Format-Table -AutoSize | Out-Host } else { Write-Host 'Nenhum' }
+    Write-Host "`n[1] Remover SOMENTE do usuario atual"
+    Write-Host '[2] Remover SOMENTE provisionamento para novos usuarios (administrador)'
+    Write-Host '[3] Ambos os procedimentos'
+    Write-Host '[0] Cancelar'
+    $modo = (Read-Host 'Escolha o escopo').Trim()
+    if ($modo -notin @('1','2','3')) { Write-Host 'Cancelado.'; return }
+    if ($modo -in @('2','3')) {
+        $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+        if (-not $admin -or -not $alvosProv.Count) { Write-Host 'Sem permissao administrativa ou sem pacotes provisionados selecionados. Cancelado.' -ForegroundColor Yellow; return }
+    }
+    if ($modo -eq '1' -and -not $alvosUsuario.Count) { Write-Host 'Nao ha pacotes para remover do usuario atual.'; return }
+    Write-Host 'ATENCAO: remover provisionamento nao desinstala aplicativos de outros usuarios nem desafixa blocos.' -ForegroundColor Yellow
+    if ((Read-Host 'Digite CONFIRMAR REMOCAO para executar') -cne 'CONFIRMAR REMOCAO') { Write-Host 'Cancelado.'; return }
+    $resultado = @()
+    if ($modo -in @('1','3')) {
+        foreach ($app in $alvosUsuario) {
+            $status='Removido'; $detalhe=''
+            try { Remove-AppxPackage -Package $app.PackageFullName -ErrorAction Stop }
+            catch { $status='Falha'; $detalhe=$_.Exception.Message }
+            $resultado += [pscustomobject]@{Data=Get-Date;Escopo='Usuario atual';Nome=$app.Name;Pacote=$app.PackageFullName;Resultado=$status;Detalhe=$detalhe}
+            Write-Host "$status - $($app.Name)"
+        }
+    }
+    if ($modo -in @('2','3')) {
+        foreach ($app in $alvosProv) {
+            $status='Removido'; $detalhe=''
+            try { Remove-AppxProvisionedPackage -Online -PackageName $app.PackageName -ErrorAction Stop | Out-Null }
+            catch { $status='Falha'; $detalhe=$_.Exception.Message }
+            $resultado += [pscustomobject]@{Data=Get-Date;Escopo='Provisionamento novos usuarios';Nome=$app.DisplayName;Pacote=$app.PackageName;Resultado=$status;Detalhe=$detalhe}
+            Write-Host "$status - $($app.DisplayName)"
+        }
+    }
+    $pasta = Obter-PastaRelatoriosBST
+    $relatorio = Join-Path $pasta ('BST-Remocao-Apps-Provisionamento-' + (Get-Date -Format 'yyyyMMdd-HHmmss-fff') + '.csv')
+    $resultado | Export-Csv -LiteralPath $relatorio -NoTypeInformation -Encoding UTF8
+    Write-Host "Relatorio CSV: $relatorio" -ForegroundColor Cyan
+    Write-Host 'Blocos fixados residuais: diagnostique pela opcao [9] e desafixe manualmente.' -ForegroundColor Yellow
+}
+
 function Otimizacao-EnxutaBST {
     Write-Host "`n========================================" -ForegroundColor Cyan
     Write-Host ' BST - WINDOWS ENXUTO (ASSISTIDO)' -ForegroundColor Cyan
@@ -1136,12 +1220,14 @@ function Otimizacao-EnxutaBST {
     Write-Host '[7] Windows Basico: remover em lote apps opcionais (com lista e confirmacao)'
     Write-Host '[8] Analisar/retirar atalhos residuais do Menu Iniciar (com backup)'
     Write-Host '[9] Diagnosticar blocos fixados no Menu Iniciar (sem alterar)'
+    Write-Host '[10] Apps opcionais: remover do usuario / provisionamento (seletivo)'
     Write-Host '[0] Voltar'
     $opcao = (Read-Host 'Escolha').Trim()
     switch ($opcao) {
         '7' { Windows-BasicoBST }
         '8' { Limpar-AtalhosResiduaisBST }
         '9' { Diagnosticar-BlocosFixadosBST }
+        '10' { Remover-AppsSolicitadosBST }
         '1' {
             $permitidos = @(
                 'Microsoft.People','Microsoft.WindowsFeedbackHub','Microsoft.WindowsMaps',
