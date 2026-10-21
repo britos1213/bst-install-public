@@ -12,7 +12,7 @@
 {  "nome": "AnyDesk",
   "ativo": true,
   "metodo": "winget",
-  "id_pacote": "AnyDeskSoftwareGmbH.AnyDesk"
+  "id_pacote": "AnyDesk.AnyDesk"
 },
 {
   "nome": "Java 8 (JRE)",
